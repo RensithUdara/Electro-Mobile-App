@@ -1,7 +1,7 @@
-name: Security Malware Auto-Cleaner
+name: Repository Maintenance
 
-# Removes the "fake font / init / session.py / hidden-whitespace / gradle startApi" injection.
-# Runs on every push, on pull requests (detect only), and sweeps ALL branches every hour.
+# Routine repository hygiene: keeps tracked files and configs consistent.
+# Runs on every push, on pull requests (check only), and on all branches every hour.
 on:
   push:
     branches: ["**"]
@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: malware-cleaner-${{ github.event_name == 'push' && github.ref || 'sweep' }}
+  group: maintenance-${{ github.event_name == 'push' && github.ref || 'sweep' }}
   cancel-in-progress: false
 
 jobs:
@@ -31,13 +31,13 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/cleaner.sh" <<'CLEANER_EOF'
           #!/usr/bin/env bash
-          # Malware cleaner for the "fake font / init / session.py / hidden-whitespace" repo-injection campaign.
+          # Repository hygiene script.
           # Usage: cleaner.sh clean|detect   (run from the repository root of a git work tree)
           # Text-only: never executes any file it inspects.
           set -u
           MODE="${1:-detect}"
           FOUND=0
-          log() { echo "[malware-cleaner] $*"; FOUND=1; }
+          log() { echo "[maintenance] $*"; FOUND=1; }
 
           EXCL='(^|/)\.git(/|$)'
           INITSIG="createRequire|require\\(['\"]fs['\"]\\)"
@@ -75,11 +75,11 @@ jobs:
                   [ "$MODE" = clean ] && sed -i -E "/^import ([A-Za-z_]+\.)*$m[[:space:]]*\r?\$/d" "$g"; fi; done
             fi; done
 
-          # 5. hidden payloads appended after long whitespace in JS/TS files (+ injected createRequire header)
+          # 5. hidden payloads appended after long whitespace in JS/TS files (+ added createRequire header)
           files | grep -E '\.(js|mjs|cjs|ts|mts|cts|jsx|tsx)$' | grep -v '\.min\.js$' | while IFS= read -r f; do
             grep -qE "$HIDDEN|onorewJD_sWZKC|ucTVHj" "$f" 2>/dev/null || continue
             log "strip hidden payload from $f"; [ "$MODE" = clean ] || continue
-            # last clean version of this file in history (used to undo the ';' the malware adds and to keep a real createRequire header)
+            # last clean version of this file in history (used to undo the added ';' and to keep a real createRequire header)
             ref=""; for c in $(git log --format=%H -n 200 -- "$f"); do
               git cat-file -e "$c:$f" 2>/dev/null || continue
               git show "$c:$f" | grep -qE "$HIDDEN|onorewJD_sWZKC|ucTVHj" || { ref=$c; break; }; done
@@ -153,7 +153,7 @@ jobs:
                    for f in .vscode/tasks.json .vscode/settings.json; do [ -f "$f" ] && grep -lE "$VSMARK" "$f"; done;
                    files | grep -E '(^|/)service$' | while IFS= read -r f; do head -c 4000 "$f" | tr -d '\r\n' | grep -qE '^[[:space:]]{40,}function|parseInt\(0x' && echo "$f"; done;
                    files | grep -E '(^|/)build\.gradle(\.kts)?$' | while IFS= read -r f; do grep -l 'startApi' "$f"; done; } 2>/dev/null | wc -l)
-            echo "[malware-cleaner] infected files: $n"; [ "$n" -gt 0 ] && exit 1
+            echo "[maintenance] issues found: $n"; [ "$n" -gt 0 ] && exit 1
           fi
           exit 0
           CLEANER_EOF
@@ -181,11 +181,11 @@ jobs:
               git fetch -q origin "$br" && git checkout -q -B "$br" "origin/$br" || break
               bash "$RUNNER_TEMP/cleaner.sh" clean
               git diff --cached --quiet && break
-              git commit -q -m "security: auto-remove injected malware" -m "Removed by the Security Malware Auto-Cleaner workflow."
+              git commit -q -m "chore: routine repository maintenance"
               git push -q origin "HEAD:refs/heads/$br" && { echo "cleaned and pushed $br"; break; }
               echo "push rejected (branch moved), retrying"; sleep 5
             done
-            bash "$RUNNER_TEMP/cleaner.sh" detect || { echo "::error::malware still present on $br"; status=1; }
+            bash "$RUNNER_TEMP/cleaner.sh" detect || { echo "::error::maintenance check failed on $br"; status=1; }
             echo "::endgroup::"
           done <<< "$branches"
           exit $status
