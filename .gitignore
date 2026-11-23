@@ -42,4 +42,7 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 node_modules
-config.bat
+.env
+.env.*
+.env.local
+.env.production
